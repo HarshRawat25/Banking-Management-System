@@ -27,6 +27,7 @@ JDBC	Database Connectivity
 Multithreading	Auto refresh & synchronization
 Java Collections	Data management
 OOP	Code design and structure
+
 📂 Project Folder Structure
 BankingSystem_Upgraded/
 │
@@ -139,15 +140,6 @@ java -cp ".;sqlite-jdbc.jar" Main
 ✔ SQLite database will auto-create
 ✔ You can start using the banking system
 
-📊 Rubric Score Evaluation
-Criteria	Marks Awarded
-OOP Concepts	✅ 10 / 10
-Collections & Generics	✅ 6 / 6
-Multithreading	✅ 4 / 4
-Database Classes	✅ 7 / 7
-Database Connectivity	✅ 3 / 3
-JDBC Implementation	✅ 3 / 3
-TOTAL	🏆 33 / 33
 🔐 Security Features
 
 Thread-safe transactions
@@ -160,11 +152,6 @@ Unique account number generation
 
 Deadlock prevention approach
 
-👨‍💻 Developed By
-
-Harsh Rawat
-Computer Science Student
-Java Developer
 
 ✅ Conclusion
 
