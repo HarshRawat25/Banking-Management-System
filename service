@@ -1,0 +1,170 @@
+package service;
+
+import dao.DatabaseHelper;
+import exception.BankingException;
+import exception.AccountNotFoundException;
+import exception.InsufficientFundsException;
+import model.Account;
+import model.SavingsAccount;
+import model.CheckingAccount;
+
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+import util.DBUtil;
+
+public class Bank {
+    private final DatabaseHelper db;
+    // Cache accounts for quick access and to demonstrate Collections & Generics
+    private final Map<String, Account> accountCache = new ConcurrentHashMap<>();
+    private final Lock serviceLock = new ReentrantLock(); // for synchronization demo
+
+    public Bank() {
+        this.db = new DatabaseHelper();
+        // preload cache
+        reloadCache();
+    }
+
+    public void reloadCache() {
+        serviceLock.lock();
+        try {
+            accountCache.clear();
+            List<Account> all = db.loadAllAccounts();
+            for (Account a : all) accountCache.put(a.getAccountNumber(), a);
+        } finally {
+            serviceLock.unlock();
+        }
+    }
+
+    public List<Account> getAllAccountsSortedBy(String criteria) {
+        List<Account> list = new ArrayList<>(accountCache.values());
+        switch (criteria.toLowerCase()) {
+            case "balance" -> list.sort(Comparator.comparingDouble(Account::getBalance));
+            case "holder" -> list.sort(Comparator.comparing(Account::getHolderName));
+            default -> list.sort(Comparator.comparing(Account::getAccountNumber));
+        }
+        return Collections.unmodifiableList(list);
+    }
+
+    // Create accounts
+    public Account createSavings(String name, String addr, double initial, double rate) throws BankingException {
+        if (initial < 0) throw new BankingException("Initial deposit cannot be negative");
+        serviceLock.lock();
+        try {
+            int custId = db.insertCustomer(name, addr);
+            String accNum = db.getNextAccountNumber("SAV");
+            boolean ok = db.insertAccount(accNum, custId, "Savings", initial);
+            if (!ok) throw new BankingException("Failed to create account");
+            db.insertSavings(accNum, rate);
+            Account a = db.loadAccount(accNum);
+            if (a != null) accountCache.put(accNum, a);
+            return a;
+        } finally {
+            serviceLock.unlock();
+        }
+    }
+
+    public Account createChecking(String name, String addr, double initial, double overdraft) throws BankingException {
+        if (initial < 0) throw new BankingException("Initial deposit cannot be negative");
+        serviceLock.lock();
+        try {
+            int custId = db.insertCustomer(name, addr);
+            String accNum = db.getNextAccountNumber("CHK");
+            boolean ok = db.insertAccount(accNum, custId, "Checking", initial);
+            if (!ok) throw new BankingException("Failed to create account");
+            db.insertChecking(accNum, overdraft);
+            Account a = db.loadAccount(accNum);
+            if (a != null) accountCache.put(accNum, a);
+            return a;
+        } finally {
+            serviceLock.unlock();
+        }
+    }
+
+    public Account findAccount(String accNum) {
+        return accountCache.get(accNum);
+    }
+
+    // deposit/withdraw synchronized per-account via object level locking
+    public String deposit(String accNum, double amount) throws BankingException {
+        if (amount <= 0) throw new BankingException("Deposit must be positive");
+        Account acc = accountCache.get(accNum);
+        if (acc == null) throw new AccountNotFoundException(accNum);
+        synchronized (acc) {
+            try {
+                String msg = acc.deposit(amount);
+                db.updateBalance(accNum, acc.getBalance());
+                return msg;
+            } catch (SQLException e) {
+                throw new BankingException("DB error: " + e.getMessage());
+            }
+        }
+    }
+
+    public String withdraw(String accNum, double amount) throws BankingException {
+        if (amount <= 0) throw new BankingException("Withdrawal must be positive");
+        Account acc = accountCache.get(accNum);
+        if (acc == null) throw new AccountNotFoundException(accNum);
+        synchronized (acc) {
+            try {
+                String msg = acc.withdraw(amount);
+                db.updateBalance(accNum, acc.getBalance());
+                return msg;
+            } catch (SQLException e) {
+                throw new BankingException("DB error: " + e.getMessage());
+            }
+        }
+    }
+
+    // atomic transfer across DB transaction using a single connection
+    public String transfer(String fromAcc, String toAcc, double amount) throws BankingException {
+        if (amount <= 0) throw new BankingException("Transfer amount must be positive");
+        // lock both account objects in consistent order to avoid deadlock
+        Account a1 = accountCache.get(fromAcc);
+        Account a2 = accountCache.get(toAcc);
+        if (a1 == null) throw new AccountNotFoundException(fromAcc);
+        if (a2 == null) throw new AccountNotFoundException(toAcc);
+        Object first = a1.getAccountNumber().compareTo(a2.getAccountNumber()) < 0 ? a1 : a2;
+        Object second = first == a1 ? a2 : a1;
+
+        synchronized (first) {
+            synchronized (second) {
+                // perform DB transaction
+                try (Connection conn = DBUtil.getConnection()) {
+                    conn.setAutoCommit(false);
+                    // reload balances from DB for stronger consistency (optional)
+                    Account fromDb = db.loadAccount(fromAcc);
+                    Account toDb = db.loadAccount(toAcc);
+                    if (fromDb == null) { conn.rollback(); throw new AccountNotFoundException(fromAcc); }
+                    if (toDb == null) { conn.rollback(); throw new AccountNotFoundException(toAcc); }
+                    // check funds
+                    if (fromDb instanceof SavingsAccount) {
+                        if (fromDb.getBalance() < amount) { conn.rollback(); throw new InsufficientFundsException("Insufficient funds in source"); }
+                    } else if (fromDb instanceof CheckingAccount) {
+                        CheckingAccount ch = (CheckingAccount) fromDb;
+                        if (fromDb.getBalance() + ch.getOverdraftLimit() < amount) { conn.rollback(); throw new InsufficientFundsException("Overdraft exceeded"); }
+                    }
+                    double newFrom = fromDb.getBalance() - amount;
+                    double newTo = toDb.getBalance() + amount;
+                    boolean u1 = db.updateBalance(conn, fromAcc, newFrom);
+                    boolean u2 = db.updateBalance(conn, toAcc, newTo);
+                    if (u1 && u2) {
+                        conn.commit();
+                        // update cache objects
+                        a1.balance = newFrom;
+                        a2.balance = newTo;
+                        return "Transfer successful";
+                    } else {
+                        conn.rollback();
+                        throw new BankingException("Transfer failed during update");
+                    }
+                } catch (SQLException e) {
+                    throw new BankingException("Transfer failed: " + e.getMessage());
+                }
+            }
+        }
+    }
+}
