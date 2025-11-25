@@ -1,0 +1,107 @@
+package model;
+
+import exception.BankingException;
+
+public abstract class Account implements AccountOperations {
+    protected final String accountNumber;
+    protected final String holderName;
+    protected double balance; // guarded by instance lock (synchronized methods)
+
+    protected Account(String accountNumber, String holderName, double balance) {
+        this.accountNumber = accountNumber;
+        this.holderName = holderName;
+        this.balance = balance;
+    }
+
+    public String getAccountNumber() { return accountNumber; }package model;
+
+import exception.BankingException;
+
+public interface AccountOperations {
+    String deposit(double amount) throws BankingExcepackage model;
+
+import exception.BankingException;
+
+public class CheckingAccount extends Account {
+    private final double overdraftLimit;
+
+    public CheckingAccount(String accountNumber, String holderName, double balance, double overdraftLimit) {
+        super(accountNumber, holderName, balance);
+        this.overdraftLimit = overdraftLimit;
+    }
+
+    public double getOverdraftLimit() { return overdraftLimit; }
+
+    @Override
+    public String getType() { return "Checking"; }
+
+    @Override
+    public synchronized String withdraw(double amount) throws BankingException {
+        if (amount <= 0) throw new BankingException("Withdrawal must be positive");
+        if (balance + overdraftLimit < amount) throw new BankingException("Overdraft limit exceeded");
+        balance -= amount;
+        return String.format("Withdrawal successful. New balance: %.2f", balance);
+    }
+
+    @Override
+    public String toString() {
+        return super.toString() + String.format(" | Overdraft: %.2f", overdraftLimit);
+    }
+}
+ption;
+    String withdraw(double amount) throws BankingException;
+    String getType();
+    double getBalance();
+    String getAccountNumber();
+}
+
+    public String getHolderName() { return holderName; }
+    @Override
+    public synchronized double getBalance() { return balance; }
+
+    @Override
+    public abstract String getType();
+
+    @Override
+    public synchronized String deposit(double amount) throws BankingExcepackage model;
+
+import exception.BankingException;
+
+public class SavingsAccount extends Account {
+    private final double interestRate;
+
+    public SavingsAccount(String accountNumber, String holderName, double balance, double interestRate) {
+        super(accountNumber, holderName, balance);
+        this.interestRate = interestRate;
+    }
+
+    public double getInterestRate() { return interestRate; }
+
+    @Override
+    public String getType() { return "Savings"; }
+
+    @Override
+    public synchronized String withdraw(double amount) throws BankingException {
+        if (amount <= 0) throw new BankingException("Withdrawal must be positive");
+        if (balance < amount) throw new BankingException("Insufficient funds in savings account");
+        balance -= amount;
+        return String.format("Withdrawal successful. New balance: %.2f", balance);
+    }
+
+    @Override
+    public String toString() {
+        return super.toString() + String.format(" | Interest: %.2f%%", interestRate);
+    }
+}
+ption {
+        if (amount <= 0) throw new BankingException("Deposit must be positive");
+        balance += amount;
+        return String.format("Deposit successful. New balance: %.2f", balance);
+    }
+
+    @Override
+    public String toString() {
+        return String.format("%s | %s | Holder: %s | Balance: %.2f",
+                accountNumber, getType(), holderName, getBalance());
+    }
+}
