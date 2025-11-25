@@ -1,0 +1,15 @@
+package exception;
+
+public class AccountNotFoundException extends BankingException {
+    public AccountNotFoundException(String acc) { super("Account not found: " + acc); }
+}
+package exception;
+
+public class BankingException extends Exception {
+    public BankingException(String message) { super(message); }
+}
+package exception;
+
+public class InsufficientFundsException extends BankingException {
+    public InsufficientFundsException(String msg) { super(msg); }
+}
