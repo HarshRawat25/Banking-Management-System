@@ -1,0 +1,150 @@
+package ui;
+
+import model.Account;
+import model.SavingsAccount;
+import model.CheckingAccount;
+import service.Bank;
+import exception.BankingException;
+
+import javax.swing.*;
+import java.awt.*;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+public class BankingUI extends JFrame {
+    private final Bank bank;
+    private final JTextArea display;
+    private final AtomicBoolean running = new AtomicBoolean(true);
+
+    public BankingUI(Bank bank) {
+        this.bank = bank;
+        setTitle("Banking System (Upgraded)");
+        setSize(900,620);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
+        setLayout(new BorderLayout(10,10));
+
+        display = new JTextArea();
+        display.setEditable(false);
+        display.setFont(new Font("Monospaced", Font.PLAIN, 12));
+        add(new JScrollPane(display), BorderLayout.CENTER);
+
+        JTabbedPane tabs = new JTabbedPane();
+        tabs.addTab("Create", createCreatePanel());
+        tabs.addTab("Transact", createTransactPanel());
+        tabs.addTab("Accounts", createAccountsPanel());
+        add(tabs, BorderLayout.NORTH);
+
+        JButton refresh = new JButton("Refresh Accounts");
+        refresh.addActionListener(e -> refreshDisplay());
+        JPanel south = new JPanel(); south.add(refresh);
+        add(south, BorderLayout.SOUTH);
+
+        Thread refresher = new Thread(this::autoRefresh, "AutoRefresher");
+        refresher.setDaemon(true);
+        refresher.start();
+
+        refreshDisplay();
+    }
+
+    private JPanel createCreatePanel() {
+        JPanel p = new JPanel(new GridBagLayout());
+        GridBagConstraints c = new GridBagConstraints();
+        c.insets = new Insets(6,6,6,6); c.fill = GridBagConstraints.HORIZONTAL;
+        c.gridx=0; c.gridy=0; p.add(new JLabel("Name:"), c);
+        c.gridx=1; JTextField name = new JTextField(15); p.add(name, c);
+        c.gridx=0; c.gridy=1; p.add(new JLabel("Address:"), c);
+        c.gridx=1; JTextField addr = new JTextField(15); p.add(addr, c);
+        c.gridx=0; c.gridy=2; p.add(new JLabel("Initial Deposit:"), c);
+        c.gridx=1; JTextField init = new JTextField(15); p.add(init, c);
+        c.gridx=0; c.gridy=3; p.add(new JLabel("Type:"), c);
+        c.gridx=1; JRadioButton sav = new JRadioButton("Savings", true); JRadioButton chk = new JRadioButton("Checking"); ButtonGroup g = new ButtonGroup(); g.add(sav); g.add(chk);
+        JPanel tp = new JPanel(new FlowLayout(FlowLayout.LEFT)); tp.add(sav); tp.add(chk); p.add(tp, c);
+        c.gridx=0; c.gridy=4; JLabel rateLabel = new JLabel("Interest/Overdraft:" ); p.add(rateLabel, c);
+        c.gridx=1; JTextField rateFld = new JTextField(15); p.add(rateFld, c);
+        sav.addActionListener(e -> rateLabel.setText("Interest (%):"));
+        chk.addActionListener(e -> rateLabel.setText("Overdraft:" ));
+        c.gridx=0; c.gridy=5; c.gridwidth=2; JButton create = new JButton("Create"); p.add(create, c);
+        create.addActionListener(e -> {
+            try {
+                String n = name.getText().trim(); String a = addr.getText().trim(); double d = Double.parseDouble(init.getText().trim()); double r = Double.parseDouble(rateFld.getText().trim());
+                Account acc;
+                if (sav.isSelected()) acc = bank.createSavings(n,a,d,r);
+                else acc = bank.createChecking(n,a,d,r);
+                JOptionPane.showMessageDialog(this, "Created: " + acc.getAccountNumber());
+                name.setText(""); addr.setText(""); init.setText(""); rateFld.setText("");
+                refreshDisplay();
+            } catch (NumberFormatException ex) { JOptionPane.showMessageDialog(this, "Please enter numeric values"); }
+            catch (BankingException ex) { JOptionPane.showMessageDialog(this, ex.getMessage()); }
+        });
+        return p;
+    }
+
+    private JPanel createTransactPanel() {
+        JPanel p = new JPanel(new GridBagLayout());
+        GridBagConstraints c = new GridBagConstraints(); c.insets=new Insets(6,6,6,6); c.fill=GridBagConstraints.HORIZONTAL;
+        c.gridx=0; c.gridy=0; p.add(new JLabel("Account Number:"), c);
+        c.gridx=1; JTextField accFld = new JTextField(15); p.add(accFld, c);
+        c.gridx=0; c.gridy=1; p.add(new JLabel("Amount:"), c);
+        c.gridx=1; JTextField amtFld = new JTextField(15); p.add(amtFld, c);
+        c.gridx=0; c.gridy=2; JButton dep = new JButton("Deposit"); p.add(dep, c);
+        c.gridx=1; JButton wit = new JButton("Withdraw"); p.add(wit, c);
+        c.gridx=0; c.gridy=3; c.gridwidth=2; JButton transfer = new JButton("Transfer"); p.add(transfer, c);
+        JTextField toAcc = new JTextField(15); c.gridx=0; c.gridy=4; p.add(new JLabel("To Account (for transfer):"), c); c.gridx=1; p.add(toAcc, c);
+
+        dep.addActionListener(e -> {
+            try {
+                String acc = accFld.getText().trim();
+                double amt = Double.parseDouble(amtFld.getText().trim());
+                String msg = bank.deposit(acc, amt);
+                JOptionPane.showMessageDialog(this, msg);
+                refreshDisplay();
+            } catch (Exception ex) { JOptionPane.showMessageDialog(this, ex.getMessage()); }
+        });
+
+        wit.addActionListener(e -> {
+            try {
+                String acc = accFld.getText().trim();
+                double amt = Double.parseDouble(amtFld.getText().trim());
+                String msg = bank.withdraw(acc, amt);
+                JOptionPane.showMessageDialog(this, msg);
+                refreshDisplay();
+            } catch (Exception ex) { JOptionPane.showMessageDialog(this, ex.getMessage()); }
+        });
+
+        transfer.addActionListener(e -> {
+            try {
+                String from = accFld.getText().trim(); String to = toAcc.getText().trim(); double amt = Double.parseDouble(amtFld.getText().trim());
+                String msg = bank.transfer(from, to, amt);
+                JOptionPane.showMessageDialog(this, msg);
+                refreshDisplay();
+            } catch (Exception ex) { JOptionPane.showMessageDialog(this, ex.getMessage()); }
+        });
+
+        return p;
+    }
+
+    private JPanel createAccountsPanel() {
+        JPanel p = new JPanel(new BorderLayout());
+        p.add(new JLabel("Accounts loaded from DB (sorted by account number):"), BorderLayout.NORTH);
+        return p;
+    }
+
+    private synchronized void refreshDisplay() {
+        List<Account> list = bank.getAllAccountsSortedBy("account");
+        StringBuilder sb = new StringBuilder("--- Accounts ---\n\n");
+        for (Account a : list) sb.append(a.toString()).append("\n");
+        if (list.isEmpty()) sb.append("(no accounts)\n");
+        display.setText(sb.toString());
+    }
+
+    private void autoRefresh() {
+        while (running.get()) {
+            try { Thread.sleep(8000); } catch (InterruptedException ignored) {}
+            if (!running.get()) break;
+            SwingUtilities.invokeLater(this::refreshDisplay);
+        }
+    }
+
+    public void stopBackground() { running.set(false); }
+}
